@@ -39,7 +39,7 @@ jobs:
 
       - name: Scaffold Android Project Structure
         run: |
-          flutter create . --platforms android --org id.go.quran
+          flutter create . --project-name quran_study --platforms android --org id.go.quran
 
       - name: Get Flutter Packages
         run: flutter pub get
