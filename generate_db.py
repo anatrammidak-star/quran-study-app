@@ -32,12 +32,14 @@ CREATE TABLE words (
     word_position INTEGER NOT NULL,
     text_uthmani TEXT NOT NULL,
     translation_literal TEXT NOT NULL,
+    root TEXT,
     lemma TEXT NOT NULL,
     particle_type TEXT
 );
 
 CREATE TABLE word_frequencies (
     lemma TEXT PRIMARY KEY,
+    root TEXT,
     total_occurrences INTEGER NOT NULL,
     frequency_rank INTEGER
 );
@@ -71,15 +73,14 @@ INSERT INTO user_progress (id, surah_number, verse_number, word_position) VALUES
 """)
 conn.commit()
 
-# Surah awal yang disiapkan (Al-Fatihah, Al-Ikhlas, Al-Falaq, An-Nas, dan ayat demonstrasi negasi Al-Baqarah 1-5)
+# Daftar surah target (Al-Fatihah, Al-Ikhlas, Al-Falaq, An-Nas)
 TARGET_SURAHS = [1, 112, 113, 114]
 RECITERS = {
     'al_husary': 6,
     'alafasy': 7
 }
 
-print("[1/4] Mengunduh teks, memetakan partikel, dan arti harfiah...")
-
+print("[1/3] Mengunduh teks Al-Qur'an dan anotasi harfiah...")
 for s_num in TARGET_SURAHS:
     url = f"https://api.quran.com/api/v4/verses/by_chapter/{s_num}?language=id&words=true&word_fields=text_uthmani,location&fields=text_uthmani"
     resp = requests.get(url)
@@ -100,7 +101,7 @@ for s_num in TARGET_SURAHS:
                 clean_lemma = raw_text.replace(" ", "").strip()
                 p_type = None
 
-                # Penanganan presisi harfiah partikel negasi
+                # Pembedaan presisi partikel negasi
                 if clean_lemma in ["لَا", "لا"]:
                     trans = "tidak (not/no)"
                     p_type = "harf_nafy_general"
@@ -122,8 +123,7 @@ for s_num in TARGET_SURAHS:
 
 conn.commit()
 
-print("[2/4] Menghitung statistik kemunculan lema (frekuensi di Al-Qur'an)...")
-# Menghitung agregasi frekuensi kemunculan
+print("[2/3] Menghitung agregasi frekuensi kemunculan lema...")
 cursor.execute("""
     INSERT INTO word_frequencies (lemma, total_occurrences)
     SELECT lemma, COUNT(*) as cnt
@@ -131,7 +131,6 @@ cursor.execute("""
     GROUP BY lemma
 """)
 
-# Memberikan peringkat (Rank)
 cursor.execute("""
     UPDATE word_frequencies
     SET frequency_rank = (
@@ -142,7 +141,7 @@ cursor.execute("""
 """)
 conn.commit()
 
-print("[3/4] Mengambil metadata audio dan timestamp per kata...")
+print("[3/3] Menghubungkan timestamp audio Al-Hushari dan Alafasy...")
 for key, r_id in RECITERS.items():
     for s_num in TARGET_SURAHS:
         ts_url = f"https://api.quran.com/api/v4/recitations/{r_id}/by_chapter/{s_num}?segments=true"
@@ -153,7 +152,8 @@ for key, r_id in RECITERS.items():
                 audio_url = af.get("audio_url")
                 if audio_url:
                     if not audio_url.startswith("http"):
-                        audio_url = f"https://download.quranicaudio.com/qdc/{'mishari_al_afasy' if r_id==7 else 'khalil_al_husary'}/{audio_url}"
+                        base = "khalil_al_husary" if r_id == 6 else "mishari_al_afasy"
+                        audio_url = f"https://download.quranicaudio.com/qdc/{base}/{audio_url}"
                     cursor.execute("INSERT OR REPLACE INTO surah_audios (reciter_key, surah_number, audio_url) VALUES (?, ?, ?)",
                                    (key, s_num, audio_url))
 
@@ -167,11 +167,8 @@ for key, r_id in RECITERS.items():
                             VALUES (?, ?, ?, ?, ?, ?)
                         """, (key, s_num, v_num, w_pos, seg[2], seg[3]))
 
-conn.commit()
-
-print("[4/4] Membangun indeks kueri...")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_w ON words(surah_number, verse_number);")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_ts ON word_audio_timestamps(reciter_key, surah_number, verse_number);")
 conn.commit()
 conn.close()
-print("Database siap dengan data kata, frekuensi, dan audio timestamp.")
+print("Selesai! Database lengkap berhasil di-generate.")
