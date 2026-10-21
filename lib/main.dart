@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' show join;
 import 'package:sqflite/sqflite.dart';
 import 'package:just_audio/just_audio.dart';
 
@@ -103,13 +103,13 @@ class _StudyScreenState extends State<StudyScreen> {
   void _confirmExit() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (BuildContext dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF16384C),
         title: const Text("Keluar Aplikasi", style: TextStyle(color: Color(0xFFD4AF37))),
         content: const Text("Simpan batas belajar saat ini dan keluar?"),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text("Batal", style: TextStyle(color: Colors.white70)),
           ),
           ElevatedButton(
