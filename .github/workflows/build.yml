@@ -37,6 +37,10 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Scaffold Android Project Structure
+        run: |
+          flutter create . --platforms android --org id.go.quran
+
       - name: Get Flutter Packages
         run: flutter pub get
 
