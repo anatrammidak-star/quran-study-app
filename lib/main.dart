@@ -17,7 +17,7 @@ Future<Database> initDatabase() async {
   final dbPath = await getDatabasesPath();
   final path = join(dbPath, "quran_study.db");
 
-  // Salin ulang jika versi baru ditimpa
+  // Selalu timpa database agar data tabel baru masuk
   ByteData data = await rootBundle.load("assets/db/quran_study.db");
   List<int> bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   await File(path).writeAsBytes(bytes, flush: true);
@@ -64,12 +64,11 @@ class _StudyScreenState extends State<StudyScreen> {
   int _currentVerse = 1;
   int _maxVerseInSurah = 7;
   
-  String _selectedReciter = 'al_husary'; // 'al_husary' atau 'alafasy'
+  String _selectedReciter = 'al_husary';
   bool _isPlaying = false;
   bool _isDownloading = false;
   bool _isAudioOffline = false;
 
-  // Fitur Pengulangan (Looping 1 - 40 Kali)
   int _targetRepeatCount = 1;
   int _currentRepeatIndex = 0;
 
@@ -78,7 +77,6 @@ class _StudyScreenState extends State<StudyScreen> {
     super.initState();
     _loadProgressAndVerse();
 
-    // Sinkronisasi highlight kata berdasarkan milidetik audio
     _audioPlayer.positionStream.listen((position) {
       final currentMs = position.inMilliseconds;
       for (var ts in _timestamps) {
@@ -93,7 +91,6 @@ class _StudyScreenState extends State<StudyScreen> {
       }
     });
 
-    // Deteksi selesai putar untuk mekanisme repeat 1 - 40x
     _audioPlayer.playerStateStream.listen((state) {
       if (mounted) {
         setState(() {
@@ -235,7 +232,6 @@ class _StudyScreenState extends State<StudyScreen> {
     await _audioPlayer.play();
   }
 
-  // Menampilkan Rincian Kata, Frekuensi, dan Variasinya
   void _showWordDetail(Map<String, dynamic> word) async {
     String negasiInfo = "";
     if (word['particle_type'] == 'harf_nafy_general') {
@@ -246,7 +242,6 @@ class _StudyScreenState extends State<StudyScreen> {
       negasiInfo = "Partikel Negasi (لَنْ): Makna 'Tidak akan pernah' untuk masa depan (Never / Future).";
     }
 
-    // Ambil daftar variasi kata dengan lema yang sama di ayat lain
     final variations = await widget.db.rawQuery('''
       SELECT DISTINCT text_uthmani, surah_number, verse_number, translation_literal 
       FROM words 
@@ -396,7 +391,6 @@ class _StudyScreenState extends State<StudyScreen> {
           title: Text("Surah $_currentSurah : Ayat $_currentVerse"),
           backgroundColor: const Color(0xFF0B1B2B),
           actions: [
-            // Pilihan Qari
             DropdownButton<String>(
               value: _selectedReciter,
               dropdownColor: const Color(0xFF16384C),
@@ -412,7 +406,6 @@ class _StudyScreenState extends State<StudyScreen> {
                 }
               },
             ),
-            // Tombol Download Audio
             IconButton(
               icon: _isDownloading
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD4AF37)))
@@ -439,7 +432,6 @@ class _StudyScreenState extends State<StudyScreen> {
         ),
         body: Column(
           children: [
-            // Bar Kontrol Audio & Pengulangan (Loop 1 - 40x)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               color: const Color(0xFF16384C).withOpacity(0.6),
@@ -459,7 +451,6 @@ class _StudyScreenState extends State<StudyScreen> {
                       ],
                     ),
                   ),
-                  // Dropdown Pilihan Pengulangan 1 - 40x
                   Row(
                     children: [
                       const Icon(Icons.repeat, size: 16, color: Color(0xFFD4AF37)),
@@ -488,7 +479,6 @@ class _StudyScreenState extends State<StudyScreen> {
                 ],
               ),
             ),
-            // Area Baca Kata per Kata
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16.0),
@@ -548,7 +538,6 @@ class _StudyScreenState extends State<StudyScreen> {
                 ),
               ),
             ),
-            // Navigasi Pindah Ayat
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               color: const Color(0xFF0B1B2B),
