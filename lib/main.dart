@@ -18,7 +18,6 @@ Future<Database> initDatabase() async {
   final dbPath = await getDatabasesPath();
   final path = join(dbPath, "quran_study.db");
 
-  // Sinkronkan selalu database terbaru dari asset
   ByteData data = await rootBundle.load("assets/db/quran_study.db");
   List<int> bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   await File(path).writeAsBytes(bytes, flush: true);
@@ -72,6 +71,27 @@ class _StudyScreenState extends State<StudyScreen> {
 
   int _targetRepeatCount = 1;
   int _currentRepeatIndex = 0;
+
+  // 0: Khat Mushaf Madinah Klasik (Scheherazade New), 1: Khat Modern (Amiri)
+  int _selectedFontIndex = 0;
+
+  TextStyle _getArabicStyle({double fontSize = 28, Color color = Colors.white}) {
+    if (_selectedFontIndex == 0) {
+      return GoogleFonts.scheherazadeNew(
+        fontSize: fontSize + 6,
+        color: color,
+        fontWeight: FontWeight.bold,
+        height: 1.8,
+      );
+    } else {
+      return GoogleFonts.amiri(
+        fontSize: fontSize,
+        color: color,
+        fontWeight: FontWeight.normal,
+        height: 1.8,
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -169,8 +189,8 @@ class _StudyScreenState extends State<StudyScreen> {
       if (audioMeta.isEmpty) throw Exception("Alamat URL belum terdaftar.");
 
       final url = audioMeta.first['audio_url'] as String;
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode != 200) throw Exception("Gagal mengunduh audio dari server CDN.");
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 40));
+      if (response.statusCode != 200) throw Exception("Server CDN mengembalikan status ${response.statusCode}.");
 
       final path = await _getLocalAudioPath();
       await File(path).writeAsBytes(response.bodyBytes);
@@ -256,11 +276,7 @@ class _StudyScreenState extends State<StudyScreen> {
               Center(
                 child: Text(
                   word['text_uthmani'],
-                  style: GoogleFonts.amiriQuran(
-                    fontSize: 42,
-                    color: const Color(0xFFD4AF37),
-                    fontWeight: FontWeight.normal,
-                  ),
+                  style: _getArabicStyle(fontSize: 40, color: const Color(0xFFD4AF37)),
                 ),
               ),
               const SizedBox(height: 6),
@@ -321,7 +337,7 @@ class _StudyScreenState extends State<StudyScreen> {
                       Text("QS ${v['surah_number']}:${v['verse_number']}", style: const TextStyle(color: Colors.white54, fontSize: 12)),
                       Text(
                         "${v['text_uthmani']} (${v['translation_literal']})",
-                        style: GoogleFonts.amiriQuran(color: Colors.white, fontSize: 16),
+                        style: _getArabicStyle(fontSize: 18, color: Colors.white),
                       ),
                     ],
                   ),
@@ -330,19 +346,6 @@ class _StudyScreenState extends State<StudyScreen> {
           ),
         );
       },
-    );
-  }
-
-  Future<void> _saveProgress() async {
-    await widget.db.insert(
-      'user_progress',
-      {
-        'id': 1,
-        'surah_number': _currentSurah,
-        'verse_number': _currentVerse,
-        'word_position': 1,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
@@ -361,7 +364,11 @@ class _StudyScreenState extends State<StudyScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD4AF37)),
             onPressed: () async {
-              await _saveProgress();
+              await widget.db.insert(
+                'user_progress',
+                {'id': 1, 'surah_number': _currentSurah, 'verse_number': _currentVerse, 'word_position': 1},
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
               await _audioPlayer.dispose();
               SystemNavigator.pop();
             },
@@ -390,7 +397,6 @@ class _StudyScreenState extends State<StudyScreen> {
           backgroundColor: const Color(0xFF0B1B2B),
           title: Row(
             children: [
-              // 1. Dropdown Pilih Surah (1 - 114)
               Expanded(
                 flex: 3,
                 child: DropdownButtonHideUnderline(
@@ -404,7 +410,7 @@ class _StudyScreenState extends State<StudyScreen> {
                         child: Text(
                           "${c['id']}. ${c['name_simple']}",
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFD4AF37)),
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFD4AF37)),
                         ),
                       );
                     }).toList(),
@@ -420,8 +426,7 @@ class _StudyScreenState extends State<StudyScreen> {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              // 2. Dropdown Pilih Nomor Ayat (1 - N)
+              const SizedBox(width: 6),
               Expanded(
                 flex: 2,
                 child: DropdownButtonHideUnderline(
@@ -432,10 +437,7 @@ class _StudyScreenState extends State<StudyScreen> {
                     items: List.generate(_maxVerseInSurah, (index) => index + 1).map((vNum) {
                       return DropdownMenuItem<int>(
                         value: vNum,
-                        child: Text(
-                          "Ayat $vNum",
-                          style: const TextStyle(fontSize: 13, color: Colors.white),
-                        ),
+                        child: Text("Ayat $vNum", style: const TextStyle(fontSize: 12, color: Colors.white)),
                       );
                     }).toList(),
                     onChanged: (val) {
@@ -455,8 +457,8 @@ class _StudyScreenState extends State<StudyScreen> {
               dropdownColor: const Color(0xFF16384C),
               underline: const SizedBox(),
               items: const [
-                DropdownMenuItem(value: 'al_husary', child: Text("Al-Hushari", style: TextStyle(fontSize: 12))),
-                DropdownMenuItem(value: 'alafasy', child: Text("Alafasy", style: TextStyle(fontSize: 12))),
+                DropdownMenuItem(value: 'al_husary', child: Text("Al-Hushari", style: TextStyle(fontSize: 11))),
+                DropdownMenuItem(value: 'alafasy', child: Text("Alafasy", style: TextStyle(fontSize: 11))),
               ],
               onChanged: (val) {
                 if (val != null) {
@@ -473,16 +475,6 @@ class _StudyScreenState extends State<StudyScreen> {
               onPressed: _isDownloading ? null : _downloadSurahAudio,
             ),
             IconButton(
-              icon: const Icon(Icons.bookmark_added_outlined, color: Color(0xFFD4AF37)),
-              tooltip: "Simpan Batas",
-              onPressed: () async {
-                await _saveProgress();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Batas baca berhasil disimpan.")));
-                }
-              },
-            ),
-            IconButton(
               icon: const Icon(Icons.exit_to_app, color: Colors.redAccent),
               tooltip: "Keluar",
               onPressed: _confirmExit,
@@ -491,58 +483,74 @@ class _StudyScreenState extends State<StudyScreen> {
         ),
         body: Column(
           children: [
-            // Bar Kontrol Pemutar Suara & Pengulangan
+            // Bar Kontrol Pemutar, Pengulangan, & Tombol Pilihan 2 Khat
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               color: const Color(0xFF16384C).withOpacity(0.6),
               child: Row(
                 children: [
                   IconButton(
-                    icon: Icon(_isPlaying ? Icons.pause_circle : Icons.play_circle, color: const Color(0xFFD4AF37), size: 38),
+                    icon: Icon(_isPlaying ? Icons.pause_circle : Icons.play_circle, color: const Color(0xFFD4AF37), size: 36),
                     onPressed: _toggleAudioPlay,
                   ),
-                  const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _isPlaying ? "Sedang Memutar (Putaran ${_currentRepeatIndex + 1}/$_targetRepeatCount)" : "$_currentSurahName : Ayat $_currentVerse",
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                          _isPlaying ? "Putaran (${_currentRepeatIndex + 1}/$_targetRepeatCount)" : "$_currentSurahName : $_currentVerse",
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                         ),
-                        const Text("Pilih langsung ayat pada menu atas", style: TextStyle(fontSize: 11, color: Colors.white54)),
+                        Text(
+                          _selectedFontIndex == 0 ? "Khat: Mushaf Madinah" : "Khat: Amiri Modern",
+                          style: const TextStyle(fontSize: 10, color: Color(0xFFD4AF37)),
+                        ),
                       ],
                     ),
                   ),
-                  Row(
-                    children: [
-                      const Icon(Icons.repeat, size: 16, color: Color(0xFFD4AF37)),
-                      const SizedBox(width: 4),
-                      DropdownButton<int>(
-                        value: _targetRepeatCount,
-                        dropdownColor: const Color(0xFF16384C),
-                        underline: const SizedBox(),
-                        items: [1, 3, 5, 7, 10, 20, 30, 40].map((int val) {
-                          return DropdownMenuItem<int>(
-                            value: val,
-                            child: Text("${val}x", style: const TextStyle(fontSize: 12, color: Color(0xFFD4AF37))),
-                          );
-                        }).toList(),
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() {
-                              _targetRepeatCount = val;
-                              _currentRepeatIndex = 0;
-                            });
-                          }
-                        },
-                      ),
-                    ],
+                  // Tombol Pilihan 2 Khat (Jelas & Tidak Tersembunyi)
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      side: const BorderSide(color: Color(0xFFD4AF37), width: 1),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.font_download_outlined, size: 14, color: Color(0xFFD4AF37)),
+                    label: Text(
+                      _selectedFontIndex == 0 ? "Madinah" : "Modern",
+                      style: const TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _selectedFontIndex = (_selectedFontIndex == 0) ? 1 : 0;
+                      });
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  // Pilihan Loop
+                  DropdownButton<int>(
+                    value: _targetRepeatCount,
+                    dropdownColor: const Color(0xFF16384C),
+                    underline: const SizedBox(),
+                    items: [1, 3, 5, 7, 10, 20, 30, 40].map((int val) {
+                      return DropdownMenuItem<int>(
+                        value: val,
+                        child: Text("${val}x", style: const TextStyle(fontSize: 11, color: Color(0xFFD4AF37))),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() {
+                          _targetRepeatCount = val;
+                          _currentRepeatIndex = 0;
+                        });
+                      }
+                    },
                   ),
                 ],
               ),
             ),
-            // Tampilan Kartu Kata (Font Khat Tajam Ramping)
+            // Area Kartu Kata
             Expanded(
               child: _words.isEmpty
                   ? const Center(child: CircularProgressIndicator(color: Color(0xFFD4AF37)))
@@ -568,11 +576,7 @@ class _StudyScreenState extends State<StudyScreen> {
                                 children: [
                                   Text(
                                     w['text_uthmani'],
-                                    style: GoogleFonts.amiriQuran(
-                                      fontSize: 30,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.normal,
-                                    ),
+                                    style: _getArabicStyle(fontSize: 24, color: Colors.white),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
@@ -599,7 +603,7 @@ class _StudyScreenState extends State<StudyScreen> {
                       ),
                     ),
             ),
-            // Tombol Navigasi Bawah Tetap Tersedia
+            // Navigasi Bawah
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               color: const Color(0xFF0B1B2B),
@@ -617,7 +621,7 @@ class _StudyScreenState extends State<StudyScreen> {
                           }
                         : null,
                   ),
-                  Text("$_currentVerse / $_maxVerseInSurah", style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text("Ayat $_currentVerse / $_maxVerseInSurah", style: const TextStyle(fontWeight: FontWeight.bold)),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF16384C)),
                     icon: const Icon(Icons.arrow_forward),
