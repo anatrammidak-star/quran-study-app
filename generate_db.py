@@ -85,17 +85,16 @@ for c in chap_res.get("chapters", []):
                    (c['id'], c['name_simple'], c['name_arabic'], c['verses_count']))
 conn.commit()
 
-print("[2/4] Menghasilkan URL Audio Resmi untuk 114 Surah...")
-# Format URL audio resmi CDN EveryAyah (Pasti Aktif 100%)
+print("[2/4] Menghasilkan URL Audio Resmi Per Surah (MP3Quran CDN)...")
 for s_num in range(1, 115):
     s_padded = f"{s_num:03d}"
-    # Al-Hushari (Murattal 128kbps)
-    url_husary = f"https://everyayah.com/data/Husary_128kbps/{s_padded}.mp3"
+    # Al-Hushari Murattal
+    url_husary = f"https://server13.mp3quran.net/husr/{s_padded}.mp3"
     cursor.execute("INSERT OR REPLACE INTO surah_audios (reciter_key, surah_number, audio_url) VALUES (?, ?, ?)",
                    ('al_husary', s_num, url_husary))
 
-    # Alafasy (128kbps)
-    url_alafasy = f"https://everyayah.com/data/Alafasy_128kbps/{s_padded}.mp3"
+    # Mishary Rashid Alafasy
+    url_alafasy = f"https://server8.mp3quran.net/afs/{s_padded}.mp3"
     cursor.execute("INSERT OR REPLACE INTO surah_audios (reciter_key, surah_number, audio_url) VALUES (?, ?, ?)",
                    ('alafasy', s_num, url_alafasy))
 conn.commit()
