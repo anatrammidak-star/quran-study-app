@@ -39,7 +39,21 @@ jobs:
 
       - name: Scaffold Android Project Structure
         run: |
-          flutter create . --project-name quran_study --platforms android --org id.go.quran
+          flutter create . --project-name quran_study --platforms android --org com.kadim.quranlearn
+
+      - name: Inject Internet Permission into AndroidManifest
+        run: |
+          python -c "
+          manifest_path = 'android/app/src/main/AndroidManifest.xml'
+          with open(manifest_path, 'r', encoding='utf-8') as f:
+              content = f.read()
+          permissions = '''    <uses-permission android:name=\"android.permission.INTERNET\"/>\n    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>\n'''
+          if 'android.permission.INTERNET' not in content:
+              content = content.replace('<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">', '<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n' + permissions)
+              with open(manifest_path, 'w', encoding='utf-8') as f:
+                  f.write(content)
+          print('AndroidManifest updated successfully with Internet permissions.')
+          "
 
       - name: Get Flutter Packages
         run: flutter pub get
