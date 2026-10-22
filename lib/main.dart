@@ -69,10 +69,15 @@ class _StudyScreenState extends State<StudyScreen> {
   bool _isDownloading = false;
   bool _isAudioOffline = false;
 
+  // Parameter Pengulangan (Looping) 1 - 40 Kali
   int _targetRepeatCount = 1;
   int _currentRepeatIndex = 0;
 
-  // 0: Khat Mushaf Madinah Klasik (Scheherazade New), 1: Khat Modern (Amiri)
+  // Penanda Milidetik Rentang Ayat
+  int _verseStartMs = 0;
+  int _verseEndMs = 0;
+
+  // Pilihan Font Khat (0: Mushaf Madinah, 1: Amiri Modern)
   int _selectedFontIndex = 0;
 
   TextStyle _getArabicStyle({double fontSize = 28, Color color = Colors.white}) {
@@ -98,27 +103,34 @@ class _StudyScreenState extends State<StudyScreen> {
     super.initState();
     _loadInitialData();
 
+    // Pantau posisi pemutaran secara real-time untuk memotong dan mengulang ayat
+    _audioPlayer.positionStream.listen((position) {
+      final currentMs = position.inMilliseconds;
+
+      if (_isPlaying && _verseEndMs > 0 && currentMs >= _verseEndMs) {
+        _handleVerseLoop();
+      }
+    });
+
     _audioPlayer.playerStateStream.listen((state) {
       if (mounted) {
         setState(() => _isPlaying = state.playing);
-        if (state.processingState == ProcessingState.completed) {
-          _handleAudioLoop();
-        }
       }
     });
   }
 
-  void _handleAudioLoop() async {
+  // Logika Pengulangan Ayat Sesuai Target (1x - 40x)
+  void _handleVerseLoop() async {
     if (_currentRepeatIndex + 1 < _targetRepeatCount) {
       setState(() => _currentRepeatIndex++);
-      await _audioPlayer.seek(Duration.zero);
+      await _audioPlayer.seek(Duration(milliseconds: _verseStartMs));
       await _audioPlayer.play();
     } else {
       setState(() {
         _currentRepeatIndex = 0;
         _isPlaying = false;
       });
-      await _audioPlayer.seek(Duration.zero);
+      await _audioPlayer.seek(Duration(milliseconds: _verseStartMs));
       await _audioPlayer.pause();
     }
   }
@@ -158,12 +170,32 @@ class _StudyScreenState extends State<StudyScreen> {
       ORDER BY w.word_position ASC
     ''', [_currentSurah, _currentVerse]);
 
+    // Ambil batas milidetik awal dan akhir ayat
+    final timeBounds = await widget.db.rawQuery('''
+      SELECT MIN(start_time_ms) as start_ms, MAX(end_time_ms) as end_ms
+      FROM word_audio_timestamps
+      WHERE reciter_key = ? AND surah_number = ? AND verse_number = ?
+    ''', [_selectedReciter, _currentSurah, _currentVerse]);
+
+    int sMs = 0;
+    int eMs = 0;
+    if (timeBounds.isNotEmpty && timeBounds.first['start_ms'] != null) {
+      sMs = timeBounds.first['start_ms'] as int;
+      eMs = timeBounds.first['end_ms'] as int;
+    }
+
     await _checkAudioStatus();
 
     setState(() {
       _words = res;
+      _verseStartMs = sMs;
+      _verseEndMs = eMs;
       _currentRepeatIndex = 0;
     });
+
+    if (_isPlaying) {
+      await _audioPlayer.seek(Duration(milliseconds: _verseStartMs));
+    }
   }
 
   Future<String> _getLocalAudioPath() async {
@@ -236,6 +268,8 @@ class _StudyScreenState extends State<StudyScreen> {
         return;
       }
     }
+
+    await _audioPlayer.seek(Duration(milliseconds: _verseStartMs));
     await _audioPlayer.play();
   }
 
@@ -331,314 +365,4 @@ class _StudyScreenState extends State<StudyScreen> {
               else
                 ...variations.map((v) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text("QS ${v['surah_number']}:${v['verse_number']}", style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                      Text(
-                        "${v['text_uthmani']} (${v['translation_literal']})",
-                        style: _getArabicStyle(fontSize: 18, color: Colors.white),
-                      ),
-                    ],
-                  ),
-                )),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _confirmExit() {
-    showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF16384C),
-        title: const Text("Tutup Aplikasi", style: TextStyle(color: Color(0xFFD4AF37))),
-        content: const Text("Simpan batas belajar ayat saat ini dan keluar?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text("Batal", style: TextStyle(color: Colors.white70)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD4AF37)),
-            onPressed: () async {
-              await widget.db.insert(
-                'user_progress',
-                {'id': 1, 'surah_number': _currentSurah, 'verse_number': _currentVerse, 'word_position': 1},
-                conflictAlgorithm: ConflictAlgorithm.replace,
-              );
-              await _audioPlayer.dispose();
-              SystemNavigator.pop();
-            },
-            child: const Text("Simpan & Keluar", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _audioPlayer.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) _confirmExit();
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          backgroundColor: const Color(0xFF0B1B2B),
-          title: Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    isExpanded: true,
-                    value: _currentSurah,
-                    dropdownColor: const Color(0xFF16384C),
-                    items: _chapters.map((c) {
-                      return DropdownMenuItem<int>(
-                        value: c['id'] as int,
-                        child: Text(
-                          "${c['id']}. ${c['name_simple']}",
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFD4AF37)),
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          _currentSurah = val;
-                          _currentVerse = 1;
-                        });
-                        _loadVerseData();
-                      }
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                flex: 2,
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    isExpanded: true,
-                    value: _currentVerse,
-                    dropdownColor: const Color(0xFF16384C),
-                    items: List.generate(_maxVerseInSurah, (index) => index + 1).map((vNum) {
-                      return DropdownMenuItem<int>(
-                        value: vNum,
-                        child: Text("Ayat $vNum", style: const TextStyle(fontSize: 12, color: Colors.white)),
-                      );
-                    }).toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() => _currentVerse = val);
-                        _loadVerseData();
-                      }
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            DropdownButton<String>(
-              value: _selectedReciter,
-              dropdownColor: const Color(0xFF16384C),
-              underline: const SizedBox(),
-              items: const [
-                DropdownMenuItem(value: 'al_husary', child: Text("Al-Hushari", style: TextStyle(fontSize: 11))),
-                DropdownMenuItem(value: 'alafasy', child: Text("Alafasy", style: TextStyle(fontSize: 11))),
-              ],
-              onChanged: (val) {
-                if (val != null) {
-                  setState(() => _selectedReciter = val);
-                  _loadVerseData();
-                }
-              },
-            ),
-            IconButton(
-              icon: _isDownloading
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD4AF37)))
-                  : Icon(_isAudioOffline ? Icons.download_done : Icons.download, color: _isAudioOffline ? Colors.greenAccent : const Color(0xFFD4AF37)),
-              tooltip: _isAudioOffline ? "Audio Tersimpan Luring" : "Unduh Audio",
-              onPressed: _isDownloading ? null : _downloadSurahAudio,
-            ),
-            IconButton(
-              icon: const Icon(Icons.exit_to_app, color: Colors.redAccent),
-              tooltip: "Keluar",
-              onPressed: _confirmExit,
-            ),
-          ],
-        ),
-        body: Column(
-          children: [
-            // Bar Kontrol Pemutar, Pengulangan, & Tombol Pilihan 2 Khat
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: const Color(0xFF16384C).withOpacity(0.6),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: Icon(_isPlaying ? Icons.pause_circle : Icons.play_circle, color: const Color(0xFFD4AF37), size: 36),
-                    onPressed: _toggleAudioPlay,
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _isPlaying ? "Putaran (${_currentRepeatIndex + 1}/$_targetRepeatCount)" : "$_currentSurahName : $_currentVerse",
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          _selectedFontIndex == 0 ? "Khat: Mushaf Madinah" : "Khat: Amiri Modern",
-                          style: const TextStyle(fontSize: 10, color: Color(0xFFD4AF37)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Tombol Pilihan 2 Khat (Jelas & Tidak Tersembunyi)
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      side: const BorderSide(color: Color(0xFFD4AF37), width: 1),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                    ),
-                    icon: const Icon(Icons.font_download_outlined, size: 14, color: Color(0xFFD4AF37)),
-                    label: Text(
-                      _selectedFontIndex == 0 ? "Madinah" : "Modern",
-                      style: const TextStyle(fontSize: 11, color: Colors.white),
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _selectedFontIndex = (_selectedFontIndex == 0) ? 1 : 0;
-                      });
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  // Pilihan Loop
-                  DropdownButton<int>(
-                    value: _targetRepeatCount,
-                    dropdownColor: const Color(0xFF16384C),
-                    underline: const SizedBox(),
-                    items: [1, 3, 5, 7, 10, 20, 30, 40].map((int val) {
-                      return DropdownMenuItem<int>(
-                        value: val,
-                        child: Text("${val}x", style: const TextStyle(fontSize: 11, color: Color(0xFFD4AF37))),
-                      );
-                    }).toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          _targetRepeatCount = val;
-                          _currentRepeatIndex = 0;
-                        });
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-            // Area Kartu Kata
-            Expanded(
-              child: _words.isEmpty
-                  ? const Center(child: CircularProgressIndicator(color: Color(0xFFD4AF37)))
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Wrap(
-                        spacing: 12,
-                        runSpacing: 16,
-                        alignment: WrapAlignment.center,
-                        textDirection: TextDirection.rtl,
-                        children: _words.map((w) {
-                          return GestureDetector(
-                            onTap: () => _showWordDetail(w),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF16384C),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.white12, width: 1.5),
-                              ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    w['text_uthmani'],
-                                    style: _getArabicStyle(fontSize: 24, color: Colors.white),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    w['translation_literal'],
-                                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black38,
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      "${w['freq']}x",
-                                      style: const TextStyle(fontSize: 10, color: Color(0xFFD4AF37)),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-            ),
-            // Navigasi Bawah
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              color: const Color(0xFF0B1B2B),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF16384C)),
-                    icon: const Icon(Icons.arrow_back),
-                    label: const Text("Sebelumnya"),
-                    onPressed: _currentVerse > 1
-                        ? () {
-                            setState(() => _currentVerse--);
-                            _loadVerseData();
-                          }
-                        : null,
-                  ),
-                  Text("Ayat $_currentVerse / $_maxVerseInSurah", style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF16384C)),
-                    icon: const Icon(Icons.arrow_forward),
-                    label: const Text("Selanjutnya"),
-                    onPressed: _currentVerse < _maxVerseInSurah
-                        ? () {
-                            setState(() => _currentVerse++);
-                            _loadVerseData();
-                          }
-                        : null,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+                  child:
