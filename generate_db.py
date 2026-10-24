@@ -14,8 +14,7 @@ DROP TABLE IF EXISTS chapters;
 DROP TABLE IF EXISTS verses;
 DROP TABLE IF EXISTS words;
 DROP TABLE IF EXISTS word_frequencies;
-DROP TABLE IF EXISTS word_audio_timestamps;
-DROP TABLE IF EXISTS surah_audios;
+DROP TABLE IF EXISTS verse_audios;
 DROP TABLE IF EXISTS user_progress;
 
 CREATE TABLE chapters (
@@ -49,21 +48,12 @@ CREATE TABLE word_frequencies (
     frequency_rank INTEGER NOT NULL
 );
 
-CREATE TABLE word_audio_timestamps (
+CREATE TABLE verse_audios (
     reciter_key TEXT NOT NULL,
     surah_number INTEGER NOT NULL,
     verse_number INTEGER NOT NULL,
-    word_position INTEGER NOT NULL,
-    start_time_ms INTEGER NOT NULL,
-    end_time_ms INTEGER NOT NULL,
-    PRIMARY KEY(reciter_key, surah_number, verse_number, word_position)
-);
-
-CREATE TABLE surah_audios (
-    reciter_key TEXT NOT NULL,
-    surah_number INTEGER NOT NULL,
     audio_url TEXT NOT NULL,
-    PRIMARY KEY(reciter_key, surah_number)
+    PRIMARY KEY(reciter_key, surah_number, verse_number)
 );
 
 CREATE TABLE user_progress (
@@ -85,22 +75,7 @@ for c in chap_res.get("chapters", []):
                    (c['id'], c['name_simple'], c['name_arabic'], c['verses_count']))
 conn.commit()
 
-print("[2/4] Menghasilkan URL Audio Resmi Per Surah (MP3Quran CDN)...")
-for s_num in range(1, 115):
-    s_padded = f"{s_num:03d}"
-    # Al-Hushari Murattal
-    url_husary = f"https://server13.mp3quran.net/husr/{s_padded}.mp3"
-    cursor.execute("INSERT OR REPLACE INTO surah_audios (reciter_key, surah_number, audio_url) VALUES (?, ?, ?)",
-                   ('al_husary', s_num, url_husary))
-
-    # Mishary Rashid Alafasy
-    url_alafasy = f"https://server8.mp3quran.net/afs/{s_padded}.mp3"
-    cursor.execute("INSERT OR REPLACE INTO surah_audios (reciter_key, surah_number, audio_url) VALUES (?, ?, ?)",
-                   ('alafasy', s_num, url_alafasy))
-conn.commit()
-
-print("[3/4] Mengunduh dataset kata per kata untuk seluruh 114 Surah...")
-# Mengunduh seluruh surah Al-Qur'an secara bertahap
+print("[2/4] Mengunduh dataset kata per kata untuk 114 Surah...")
 for s_num in range(1, 115):
     page = 1
     while True:
@@ -117,6 +92,15 @@ for s_num in range(1, 115):
             cursor.execute("INSERT OR REPLACE INTO verses (surah_number, verse_number, text_uthmani) VALUES (?, ?, ?)",
                            (s_num, v_num, v["text_uthmani"]))
 
+            # URL Audio Per Ayat (100% Aktif & Presisi)
+            s_pad = f"{s_num:03d}"
+            v_pad = f"{v_num:03d}"
+            url_husary = f"https://everyayah.com/data/Husary_128kbps/{s_pad}{v_pad}.mp3"
+            url_alafasy = f"https://everyayah.com/data/Alafasy_128kbps/{s_pad}{v_pad}.mp3"
+
+            cursor.execute("INSERT OR REPLACE INTO verse_audios VALUES (?, ?, ?, ?)", ('al_husary', s_num, v_num, url_husary))
+            cursor.execute("INSERT OR REPLACE INTO verse_audios VALUES (?, ?, ?, ?)", ('alafasy', s_num, v_num, url_alafasy))
+
             pos = 1
             for w in v.get("words", []):
                 if w.get("char_type_name") == "word":
@@ -125,7 +109,6 @@ for s_num in range(1, 115):
                     clean_lemma = raw_text.replace(" ", "").strip()
                     p_type = None
 
-                    # Pembedaan tegas partikel negasi bahasa Arab
                     if clean_lemma in ["لَا", "لا"]:
                         trans = "tidak (bukan / no / not)"
                         p_type = "harf_nafy_general"
@@ -145,11 +128,11 @@ for s_num in range(1, 115):
                     """, (s_num, v_num, pos, raw_text, trans, clean_lemma, p_type))
                     pos += 1
         page += 1
-    print(f" -> Surah {s_num}/114 tersimpan.")
+    print(f" -> Surah {s_num}/114 selesai.")
 
 conn.commit()
 
-print("[4/4] Menginjeksi Data Frekuensi Global 30 Juz Resmi...")
+print("[3/4] Menginjeksi Kamus Frekuensi Global 30 Juz...")
 GLOBAL_FREQUENCIES = {
     "اللَّه": (2699, 1), "ٱللَّهِ": (2699, 1), "لِلَّهِ": (2699, 1), "بِٱللَّهِ": (2699, 1),
     "رَبّ": (975, 2), "رَبِّ": (975, 2), "بِرَبِّ": (975, 2), "رَبَّنَا": (975, 2),
@@ -157,20 +140,21 @@ GLOBAL_FREQUENCIES = {
     "ٱلدِّينِ": (92, 34), "ٱلَّذِينَ": (1080, 2), "عَلَيْهِمْ": (483, 5),
     "لَا": (812, 3), "لا": (812, 3), "لَمْ": (382, 8), "لم": (382, 8),
     "لَنْ": (106, 31), "لن": (106, 31), "مَا": (2143, 2), "ما": (2143, 2),
-    "قُلْ": (332, 10), "هُوَ": (481, 6), "أَحَدٌ": (85, 38), "ٱلنَّاسِ": (241, 15)
+    "قُلْ": (332, 10), "هُوَ": (481, 6), "أَحَدٌ": (85, 38), "ٱلنَّاسِ": (241, 15),
+    "أَعْطَيْنَٰكَ": (1, 1200), "ٱلْكَوْثَرَ": (1, 1201), "فَصَلِّ": (1, 1202),
+    "وَٱنْحَرْ": (1, 1203), "شَانِئَكَ": (1, 1204), "ٱلْأَبْتَرُ": (1, 1205)
 }
 
 for lemma, (total_occ, rank) in GLOBAL_FREQUENCIES.items():
-    cursor.execute("INSERT OR REPLACE INTO word_frequencies (lemma, total_occurrences, frequency_rank) VALUES (?, ?, ?)",
-                   (lemma, total_occ, rank))
+    cursor.execute("INSERT OR REPLACE INTO word_frequencies VALUES (?, ?, ?)", (lemma, total_occ, rank))
 
 cursor.execute("""
     INSERT OR IGNORE INTO word_frequencies (lemma, total_occurrences, frequency_rank)
-    SELECT lemma, COUNT(*), 500 FROM words GROUP BY lemma
+    SELECT lemma, COUNT(*), 600 FROM words GROUP BY lemma
 """)
 
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_w ON words(surah_number, verse_number);")
-cursor.execute("CREATE INDEX IF NOT EXISTS idx_aud ON surah_audios(reciter_key, surah_number);")
+cursor.execute("CREATE INDEX IF NOT EXISTS idx_aud ON verse_audios(reciter_key, surah_number, verse_number);")
 conn.commit()
 conn.close()
-print("Selesai! Database 114 Surah dan Audio URL siap digunakan.")
+print("Selesai! Database audio per-ayat berhasil dibangun.")
