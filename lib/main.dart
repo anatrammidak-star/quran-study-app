@@ -59,10 +59,10 @@ class _StudyScreenState extends State<StudyScreen> {
   List<Map<String, dynamic>> _chapters = [];
   List<Map<String, dynamic>> _words = [];
 
-  int _currentSurah = 1;
+  int _currentSurah = 108; // Default Al-Kautsar untuk uji coba
   int _currentVerse = 1;
-  int _maxVerseInSurah = 7;
-  String _currentSurahName = "Al-Fatihah";
+  int _maxVerseInSurah = 3;
+  String _currentSurahName = "Al-Kawthar";
 
   String _selectedReciter = 'al_husary';
   bool _isPlaying = false;
@@ -71,9 +71,6 @@ class _StudyScreenState extends State<StudyScreen> {
 
   int _targetRepeatCount = 1;
   int _currentRepeatIndex = 0;
-
-  int _verseStartMs = 0;
-  int _verseEndMs = 0;
 
   int _selectedFontIndex = 0;
 
@@ -100,31 +97,30 @@ class _StudyScreenState extends State<StudyScreen> {
     super.initState();
     _loadInitialData();
 
-    _audioPlayer.positionStream.listen((position) {
-      final currentMs = position.inMilliseconds;
-      if (_isPlaying && _verseEndMs > 0 && currentMs >= _verseEndMs) {
-        _handleVerseLoop();
-      }
-    });
-
+    // Listener Pengulangan Otomatis Saat Ayat Selesai
     _audioPlayer.playerStateStream.listen((state) {
-      if (mounted) {
-        setState(() => _isPlaying = state.playing);
+      if (!mounted) return;
+
+      setState(() => _isPlaying = state.playing);
+
+      if (state.processingState == ProcessingState.completed) {
+        _handleLoopCompleted();
       }
     });
   }
 
-  void _handleVerseLoop() async {
+  void _handleLoopCompleted() async {
     if (_currentRepeatIndex + 1 < _targetRepeatCount) {
       setState(() => _currentRepeatIndex++);
-      await _audioPlayer.seek(Duration(milliseconds: _verseStartMs));
+      await _audioPlayer.seek(Duration.zero);
       await _audioPlayer.play();
     } else {
+      // Target pengulangan terpenuhi: BERHENTI (PAUSE) dan reset indeks
       setState(() {
         _currentRepeatIndex = 0;
         _isPlaying = false;
       });
-      await _audioPlayer.seek(Duration(milliseconds: _verseStartMs));
+      await _audioPlayer.seek(Duration.zero);
       await _audioPlayer.pause();
     }
   }
@@ -133,7 +129,7 @@ class _StudyScreenState extends State<StudyScreen> {
     final chaps = await widget.db.rawQuery("SELECT * FROM chapters ORDER BY id ASC");
     final progress = await widget.db.query('user_progress', where: 'id = 1');
 
-    int sId = 1;
+    int sId = 108;
     int vId = 1;
     if (progress.isNotEmpty) {
       sId = progress.first['surah_number'] as int;
@@ -150,6 +146,8 @@ class _StudyScreenState extends State<StudyScreen> {
   }
 
   Future<void> _loadVerseData() async {
+    await _audioPlayer.stop();
+
     final chMeta = await widget.db.query('chapters', where: 'id = ?', whereArgs: [_currentSurah]);
     if (chMeta.isNotEmpty) {
       _currentSurahName = chMeta.first['name_simple'] as String;
@@ -164,36 +162,20 @@ class _StudyScreenState extends State<StudyScreen> {
       ORDER BY w.word_position ASC
     ''', [_currentSurah, _currentVerse]);
 
-    final timeBounds = await widget.db.rawQuery('''
-      SELECT MIN(start_time_ms) as start_ms, MAX(end_time_ms) as end_ms
-      FROM word_audio_timestamps
-      WHERE reciter_key = ? AND surah_number = ? AND verse_number = ?
-    ''', [_selectedReciter, _currentSurah, _currentVerse]);
-
-    int sMs = 0;
-    int eMs = 0;
-    if (timeBounds.isNotEmpty && timeBounds.first['start_ms'] != null) {
-      sMs = timeBounds.first['start_ms'] as int;
-      eMs = timeBounds.first['end_ms'] as int;
-    }
-
     await _checkAudioStatus();
 
     setState(() {
       _words = res;
-      _verseStartMs = sMs;
-      _verseEndMs = eMs;
       _currentRepeatIndex = 0;
+      _isPlaying = false;
     });
-
-    if (_isPlaying) {
-      await _audioPlayer.seek(Duration(milliseconds: _verseStartMs));
-    }
   }
 
   Future<String> _getLocalAudioPath() async {
     final dir = await getApplicationDocumentsDirectory();
-    return join(dir.path, 'audio_${_selectedReciter}_$_currentSurah.mp3');
+    final sPad = _currentSurah.toString().padLeft(3, '0');
+    final vPad = _currentVerse.toString().padLeft(3, '0');
+    return join(dir.path, 'audio_${_selectedReciter}_${sPad}${vPad}.mp3');
   }
 
   Future<void> _checkAudioStatus() async {
@@ -202,19 +184,19 @@ class _StudyScreenState extends State<StudyScreen> {
     setState(() => _isAudioOffline = exists);
   }
 
-  Future<void> _downloadSurahAudio() async {
+  Future<void> _downloadCurrentVerseAudio() async {
     setState(() => _isDownloading = true);
     try {
       final audioMeta = await widget.db.query(
-        'surah_audios',
-        where: 'reciter_key = ? AND surah_number = ?',
-        whereArgs: [_selectedReciter, _currentSurah],
+        'verse_audios',
+        where: 'reciter_key = ? AND surah_number = ? AND verse_number = ?',
+        whereArgs: [_selectedReciter, _currentSurah, _currentVerse],
       );
 
       if (audioMeta.isEmpty) throw Exception("Alamat URL belum terdaftar.");
 
       final url = audioMeta.first['audio_url'] as String;
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 40));
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 30));
       if (response.statusCode != 200) throw Exception("Server CDN mengembalikan status ${response.statusCode}.");
 
       final path = await _getLocalAudioPath();
@@ -223,7 +205,7 @@ class _StudyScreenState extends State<StudyScreen> {
       await _checkAudioStatus();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Audio surah berhasil diunduh dan tersimpan secara offline!")),
+          const SnackBar(content: Text("Audio ayat berhasil diunduh secara offline!")),
         );
       }
     } catch (e) {
@@ -248,9 +230,9 @@ class _StudyScreenState extends State<StudyScreen> {
       await _audioPlayer.setFilePath(localPath);
     } else {
       final audioMeta = await widget.db.query(
-        'surah_audios',
-        where: 'reciter_key = ? AND surah_number = ?',
-        whereArgs: [_selectedReciter, _currentSurah],
+        'verse_audios',
+        where: 'reciter_key = ? AND surah_number = ? AND verse_number = ?',
+        whereArgs: [_selectedReciter, _currentSurah, _currentVerse],
       );
       if (audioMeta.isNotEmpty) {
         await _audioPlayer.setUrl(audioMeta.first['audio_url'] as String);
@@ -262,7 +244,6 @@ class _StudyScreenState extends State<StudyScreen> {
       }
     }
 
-    await _audioPlayer.seek(Duration(milliseconds: _verseStartMs));
     await _audioPlayer.play();
   }
 
@@ -498,8 +479,8 @@ class _StudyScreenState extends State<StudyScreen> {
               icon: _isDownloading
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD4AF37)))
                   : Icon(_isAudioOffline ? Icons.download_done : Icons.download, color: _isAudioOffline ? Colors.greenAccent : const Color(0xFFD4AF37)),
-              tooltip: _isAudioOffline ? "Audio Tersimpan Luring" : "Unduh Audio",
-              onPressed: _isDownloading ? null : _downloadSurahAudio,
+              tooltip: _isAudioOffline ? "Audio Ayat Tersimpan Luring" : "Unduh Audio Ayat Ini",
+              onPressed: _isDownloading ? null : _downloadCurrentVerseAudio,
             ),
             IconButton(
               icon: const Icon(Icons.exit_to_app, color: Colors.redAccent),
@@ -524,7 +505,7 @@ class _StudyScreenState extends State<StudyScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _isPlaying ? "Putaran (${_currentRepeatIndex + 1}/$_targetRepeatCount)" : "$_currentSurahName : $_currentVerse",
+                          _isPlaying ? "Putaran (${_currentRepeatIndex + 1}/$_targetRepeatCount)" : "$_currentSurahName : Ayat $_currentVerse",
                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                         ),
                         Text(
